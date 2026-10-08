@@ -1,0 +1,27 @@
+/* 页面内提示条：仅在扩展主动调用时显示，用于提醒用户处理验证码等 */
+#gsxt-helper-tip {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  z-index: 2147483647;
+  max-width: 320px;
+  padding: 12px 16px;
+  border-radius: 8px;
+  background: #004d26;
+  color: #e5fff2;
+  font-family: 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif;
+  font-size: 14px;
+  line-height: 20px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.18);
+}
+
+#gsxt-helper-tip .tip-title {
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+#gsxt-helper-tip .tip-desc {
+  opacity: 0.86;
+  font-size: 12px;
+  line-height: 18px;
+}

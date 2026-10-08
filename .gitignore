@@ -1,0 +1,16 @@
+# 运行扩展时产生的截图目录
+te/
+截图/
+
+# 企业名单等测试数据，避免把业务数据带进仓库
+*.xlsx
+*.xls
+*.csv
+*.docx
+
+# 系统与编辑器文件
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/

@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>企业信息自动查询截图</title>
+    <link rel="stylesheet" href="panel.css" />
+  </head>
+  <body>
+    <header class="page-head">
+      <h1>企业信息自动查询截图</h1>
+      <p class="sub">读取 Excel → 自动填入查询 → 企业详情整页截图</p>
+    </header>
+
+    <!-- 1. 数据源 -->
+    <section class="card">
+      <div class="card-title">1. 导入企业名称</div>
+      <input type="file" id="fileInput" accept=".xlsx,.xls,.csv" />
+      <label class="check">
+        <input type="checkbox" id="hasHeader" checked />
+        首行是表头
+      </label>
+      <div class="row" id="columnRow" hidden>
+        <label for="columnSelect">名称所在列</label>
+        <select id="columnSelect"></select>
+        <span class="muted" id="taskCount"></span>
+      </div>
+    </section>
+
+    <!-- 2. 查询站点 -->
+    <section class="card">
+      <div class="card-title">2. 查询站点</div>
+      <div class="sites" id="siteList"></div>
+      <div class="muted notice">企查查 / 爱企查 需先在该站点登录，扩展会复用你浏览器里的登录状态。</div>
+    </section>
+
+    <!-- 3. 保存位置 -->
+    <section class="card">
+      <div class="card-title">3. 截图保存位置</div>
+      <div class="row">
+        <button id="pickFolderBtn">选择文件夹</button>
+        <button id="clearFolderBtn">清除</button>
+      </div>
+      <div class="muted folder-path" id="folderLabel">未指定，将保存到浏览器下载目录</div>
+    </section>
+
+    <!-- 4. 执行控制 -->
+    <section class="card">
+      <div class="card-title">4. 执行</div>
+      <div class="toolbar">
+        <button id="startBtn" class="primary" disabled>开始</button>
+        <button id="pauseBtn" disabled>暂停</button>
+        <button id="stopBtn" disabled>停止</button>
+        <button id="retryBtn" disabled>重试失败</button>
+      </div>
+      <div class="progress"><div class="progress-bar" id="progressBar"></div></div>
+      <div class="row between">
+        <span class="muted" id="statusText">未开始</span>
+        <span class="muted" id="progressText">0 / 0</span>
+      </div>
+    </section>
+
+    <!-- 阻塞提醒（验证码 / 登录） -->
+    <section class="banner" id="hintBanner" hidden></section>
+
+    <!-- 5. 任务列表 -->
+    <section class="card">
+      <div class="card-title">5. 任务列表</div>
+      <ul class="task-list" id="taskList"></ul>
+    </section>
+
+    <!-- 6. 日志 -->
+    <section class="card">
+      <div class="card-title">运行日志</div>
+      <pre class="log" id="logView"></pre>
+    </section>
+
+    <script src="../lib/xlsx.full.min.js"></script>
+    <script src="../content/sites.js"></script>
+    <script src="folder-store.js"></script>
+    <script src="panel.js"></script>
+  </body>
+</html>

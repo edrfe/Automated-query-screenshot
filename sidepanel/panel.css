@@ -237,3 +237,25 @@ button.primary:not(:disabled) {
   white-space: pre-wrap;
   word-break: break-all;
 }
+
+.disclaimer {
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+  color: var(--danger);
+  font-size: 11px;
+  line-height: 17px;
+}
+
+.disclaimer-title {
+  margin-bottom: 4px;
+  color: var(--danger);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.disclaimer p {
+  margin: 0;
+}

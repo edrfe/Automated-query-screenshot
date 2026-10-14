@@ -90,6 +90,23 @@ input[type='file'] {
   font-size: 12px;
 }
 
+input[type='text'] {
+  flex: 1;
+  min-width: 0;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 13px;
+}
+
+.divider {
+  height: 1px;
+  margin: 12px 0;
+  background: var(--border);
+}
+
 select {
   flex: 1;
   min-width: 0;
@@ -136,6 +153,11 @@ button.primary:not(:disabled) {
   border-color: var(--brand);
   color: var(--brand-text);
   font-weight: 600;
+}
+
+button.inline {
+  flex: none;
+  padding: 6px 14px;
 }
 
 .progress {

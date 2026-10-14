@@ -22,9 +22,23 @@
       </p>
     </section>
 
-    <!-- 1. 数据源 -->
+    <!-- 1. 企业名称来源 -->
     <section class="card">
-      <div class="card-title">1. 导入企业名称</div>
+      <div class="card-title">1. 企业名称来源</div>
+
+      <div class="row">
+        <input
+          type="text"
+          id="singleNameInput"
+          placeholder="输入单个企业名称，回车即可查询"
+        />
+        <button id="singleQueryBtn" class="inline">查询</button>
+      </div>
+      <div class="muted notice">只查一家企业时，直接输入名称即可，无需导入文件。</div>
+
+      <div class="divider"></div>
+
+      <div class="muted notice">批量查询请导入文件：</div>
       <input type="file" id="fileInput" accept=".xlsx,.xls,.csv" />
       <label class="check">
         <input type="checkbox" id="hasHeader" checked />
@@ -44,9 +58,13 @@
       <div class="muted notice">企查查 / 爱企查 需先在该站点登录，扩展会复用你浏览器里的登录状态。</div>
     </section>
 
-    <!-- 3. 保存位置 -->
+    <!-- 3. 截图设置 -->
     <section class="card">
-      <div class="card-title">3. 截图保存位置</div>
+      <div class="card-title">3. 截图设置</div>
+      <label class="check">
+        <input type="checkbox" id="shotToggle" checked />
+        截图并保存（关闭后仅执行查询，不生成图片）
+      </label>
       <div class="row">
         <button id="pickFolderBtn">选择文件夹</button>
         <button id="clearFolderBtn">清除</button>

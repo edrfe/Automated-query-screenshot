@@ -18,6 +18,8 @@ const SITES = window.GSXT_SITES;
 const SITE_ORDER = window.GSXT_SITE_ORDER;
 
 const dom = {
+  singleNameInput: document.getElementById('singleNameInput'),
+  singleQueryBtn: document.getElementById('singleQueryBtn'),
   fileInput: document.getElementById('fileInput'),
   hasHeader: document.getElementById('hasHeader'),
   columnRow: document.getElementById('columnRow'),
@@ -27,6 +29,7 @@ const dom = {
   pickFolderBtn: document.getElementById('pickFolderBtn'),
   clearFolderBtn: document.getElementById('clearFolderBtn'),
   folderLabel: document.getElementById('folderLabel'),
+  shotToggle: document.getElementById('shotToggle'),
   startBtn: document.getElementById('startBtn'),
   pauseBtn: document.getElementById('pauseBtn'),
   stopBtn: document.getElementById('stopBtn'),
@@ -184,7 +187,7 @@ function buildColumnOptions() {
   buildItems();
 }
 
-/** 依据当前列与勾选站点构建队列（企业去重，站点按顺序展开） */
+/** 依据当前列构建队列（读取表格中的企业名称，去重后交给 applyNames） */
 function buildItems() {
   const rows = state.rawRows;
   const useHeader = dom.hasHeader.checked;
@@ -201,6 +204,11 @@ function buildItems() {
     names.push(name);
   }
 
+  applyNames(names);
+}
+
+/** 依据企业名列表与勾选站点构建队列（站点按顺序展开为多条任务） */
+function applyNames(names) {
   const siteIds = selectedSiteIds();
   const items = [];
   for (const name of names) {
@@ -214,6 +222,26 @@ function buildItems() {
   renderTasks();
   updateProgress();
   updateButtons();
+}
+
+/** 单个企业名称查询：构建单条队列并立即开始执行 */
+async function querySingleName() {
+  if (state.running) return;
+
+  const name = dom.singleNameInput.value.trim();
+  if (!name) {
+    log('请先输入企业名称');
+    dom.singleNameInput.focus();
+    return;
+  }
+  if (!selectedSiteIds().length) {
+    log('请至少勾选一个查询站点');
+    return;
+  }
+
+  applyNames([name]);
+  log(`单个企业查询：${name}`);
+  await runLoop();
 }
 
 // ---------------------------------------------------------------------------
@@ -285,6 +313,11 @@ function updateButtons() {
   dom.fileInput.disabled = state.running;
   dom.columnSelect.disabled = state.running;
   dom.hasHeader.disabled = state.running;
+  dom.singleNameInput.disabled = state.running;
+  dom.singleQueryBtn.disabled = state.running;
+  dom.shotToggle.disabled = state.running;
+  dom.pickFolderBtn.disabled = state.running || !dom.shotToggle.checked;
+  dom.clearFolderBtn.disabled = state.running || !dom.shotToggle.checked;
   dom.siteList.querySelectorAll('input').forEach((input) => {
     input.disabled = state.running;
   });
@@ -770,6 +803,12 @@ async function processOne(item) {
     await waitForState(tabId, ['detail'], 30000, item.name);
   }
 
+  // 用户关闭截图开关时，只查询不截图
+  if (!dom.shotToggle.checked) {
+    log(`[${site.short}] 已完成查询（截图开关已关闭，未生成图片）`);
+    return;
+  }
+
   // 滚动触发懒加载后回到顶部，保证整页内容完整
   await sendCommand(tabId, { cmd: 'SCROLL_PREPARE' });
   await sleep(600);
@@ -841,6 +880,22 @@ async function runLoop() {
 // ---------------------------------------------------------------------------
 // 事件绑定与初始化
 // ---------------------------------------------------------------------------
+
+/** 单个企业名称查询：点击「查询」或输入框回车触发 */
+dom.singleQueryBtn.addEventListener('click', () => {
+  querySingleName();
+});
+
+dom.singleNameInput.addEventListener('keydown', (event) => {
+  if (event.key !== 'Enter') return;
+  event.preventDefault();
+  querySingleName();
+});
+
+dom.shotToggle.addEventListener('change', () => {
+  updateButtons();
+  log(dom.shotToggle.checked ? '已开启截图' : '已关闭截图，仅执行查询');
+});
 
 dom.fileInput.addEventListener('change', async (event) => {
   const file = event.target.files && event.target.files[0];
@@ -953,7 +1008,7 @@ async function init() {
   }
   updateFolderLabel();
 
-  log('面板已就绪，请先导入包含企业名称的 Excel / CSV 文件');
+  log('面板已就绪，请输入单个企业名称，或导入包含企业名称的 Excel / CSV 文件');
   updateButtons();
 }
 

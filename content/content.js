@@ -269,10 +269,11 @@
     if (findChallenge()) return 'captcha';
     if (findLoginDialog()) return 'login';
     if (isDetailPage()) return 'detail';
-    if (isEmptyResult()) return 'empty';
     // 结果页地址特征明确时只在对应地址上判定，避免把资讯页里含企业名的链接误判为结果
     const resultsAllowed = !CFG.resultsUrlPattern || CFG.resultsUrlPattern.test(location.href);
+    // 先判有结果：结果页的侧栏、页脚常出现「暂无数据」等文案，先判空结果会误报
     if (resultsAllowed && findResultLinks(name).length) return 'results';
+    if (isEmptyResult()) return 'empty';
     if (findSearchInput()) return 'home';
     return 'unknown';
   }

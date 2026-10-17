@@ -11,6 +11,7 @@
 
 const POLL_INTERVAL_MS = 1000; // 页面状态轮询间隔
 const SEARCH_TIMEOUT_MS = 40000; // 单次查询等待结果超时
+const RESUBMIT_GRACE_MS = 5000; // 阻塞解除后确认仍停留在首页的观察时长
 const BLOCK_TIMEOUT_MS = 300000; // 等待人工过验证码 / 登录的超时
 const MAX_CAPTURE_HEIGHT = 16384; // Chrome 单张截图的高度上限
 
@@ -452,6 +453,8 @@ async function getTabInfo(tabId) {
 async function waitForState(tabId, wanted, timeoutMs, name) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
+    // 用户点击停止后立即中断等待
+    if (!state.running) throw new Error('已停止');
     const pageState = await getPageState(tabId, name);
     if (pageState === 'debugblock') {
       const tab = await getTabInfo(tabId);
@@ -660,17 +663,41 @@ async function ensureFolderPermission(handle) {
   }
 }
 
+/** 目录内已有同名文件时追加序号，返回可安全使用的文件名 */
+async function uniqueFileName(dir, fileName) {
+  const dot = fileName.lastIndexOf('.');
+  const base = dot > 0 ? fileName.slice(0, dot) : fileName;
+  const ext = dot > 0 ? fileName.slice(dot) : '';
+
+  let candidate = fileName;
+  for (let index = 1; index < 1000; index += 1) {
+    try {
+      // 能取到说明文件已存在，换下一个序号
+      await dir.getFileHandle(candidate);
+    } catch (error) {
+      return candidate;
+    }
+    candidate = `${base} (${index})${ext}`;
+  }
+  return `${base} (${Date.now()})${ext}`;
+}
+
 /** 保存截图：优先写入选定文件夹的站点子目录，失败则回退到下载目录 */
 async function saveScreenshot(dataUrl, fileName, siteFolder) {
   if (state.folderHandle) {
     try {
       if (await ensureFolderPermission(state.folderHandle)) {
         const dir = await state.folderHandle.getDirectoryHandle(siteFolder, { create: true });
-        const fileHandle = await dir.getFileHandle(fileName, { create: true });
+        const finalName = await uniqueFileName(dir, fileName);
+        const fileHandle = await dir.getFileHandle(finalName, { create: true });
         const writable = await fileHandle.createWritable();
         await writable.write(dataUrlToBlob(dataUrl));
         await writable.close();
-        return { location: `${state.folderHandle.name}\\${siteFolder}`, fallback: false };
+        return {
+          location: `${state.folderHandle.name}\\${siteFolder}`,
+          fileName: finalName,
+          fallback: false,
+        };
       }
       log('保存文件夹授权已失效，本次改为保存到下载目录（可点「选择文件夹」重新授权）');
     } catch (error) {
@@ -686,7 +713,7 @@ async function saveScreenshot(dataUrl, fileName, siteFolder) {
     saveAs: false,
     conflictAction: 'uniquify',
   });
-  return { location: `下载目录/${base}/${siteFolder}`, fallback: true };
+  return { location: `下载目录/${base}/${siteFolder}`, fileName, fallback: true };
 }
 
 /** 刷新保存位置文案 */
@@ -706,9 +733,14 @@ async function waitForSearchOutcome(tabId, name, site) {
   let blockDeadline = 0;
   let blockKind = '';
   let resubmitted = false;
+  let pendingResubmit = false; // 阻塞解除后是否需要补一次查询
+  let homeSince = 0; // 连续处于首页的起始时间
   let lastState = '';
 
   while (Date.now() < Math.max(searchDeadline, blockDeadline)) {
+    // 用户点击停止后立即中断，避免被登录 / 验证码等待拖住数分钟
+    if (!state.running) throw new Error('已停止');
+
     const pageState = await getPageState(tabId, name);
 
     // 记录状态变化，超时时能看出页面究竟停在哪个状态
@@ -747,12 +779,25 @@ async function waitForSearchOutcome(tabId, name, site) {
       blockKind = '';
       await updateBlockHint(null);
 
-      // 登录后站点常会跳到自己的落地页而不是回到查询结果页，此时需要重新提交一次查询
-      if (pageState === 'home' && !resubmitted) {
-        resubmitted = true;
-        searchDeadline = Date.now() + SEARCH_TIMEOUT_MS;
-        log(`[${site.short}] 重新提交查询：${name}`);
-        await sendCommand(tabId, { cmd: 'FILL_AND_SEARCH', name }).catch(() => {});
+      // 登录后站点常会跳到自己的落地页而不是回到查询结果页，此时需要重新提交一次查询；
+      // 但结果页渲染前也可能呈现为首页，因此先观察一段时间，确认确实停在首页再提交
+      pendingResubmit = true;
+      homeSince = 0;
+    }
+
+    if (pendingResubmit && !resubmitted) {
+      if (pageState === 'home') {
+        if (!homeSince) homeSince = Date.now();
+        if (Date.now() - homeSince >= RESUBMIT_GRACE_MS) {
+          pendingResubmit = false;
+          resubmitted = true;
+          searchDeadline = Date.now() + SEARCH_TIMEOUT_MS;
+          log(`[${site.short}] 重新提交查询：${name}`);
+          await sendCommand(tabId, { cmd: 'FILL_AND_SEARCH', name }).catch(() => {});
+        }
+      } else if (pageState !== 'loading') {
+        // 已进入结果页 / 详情页等，无需再提交
+        pendingResubmit = false;
       }
     }
 
@@ -816,7 +861,7 @@ async function processOne(item) {
   const dataUrl = await captureFullPage(tabId);
   const fileName = `${sanitizeFileName(item.name)}_${timestamp()}.png`;
   const saved = await saveScreenshot(dataUrl, fileName, site.folder);
-  log(`[${site.short}] 已保存到 ${saved.location}\\${fileName}`);
+  log(`[${site.short}] 已保存到 ${saved.location}\\${saved.fileName}`);
 }
 
 /** 主循环：串行处理队列 */
@@ -847,12 +892,19 @@ async function runLoop() {
         await processOne(item);
         item.status = 'done';
       } catch (error) {
-        item.status = 'failed';
-        item.note = error && error.message ? error.message : String(error);
-        log(`失败：[${SITES[item.siteId].short}] ${item.name} — ${item.note}`);
-        await updateBlockHint(null);
-        // 失败时自动采集页面结构，便于校准选择器
-        if (state.tabId != null) await logPageDiagnostics(state.tabId, item.name);
+        if (!state.running) {
+          // 用户点击停止导致的中断不算失败，保留待处理状态
+          item.status = 'pending';
+          item.note = '';
+          log('已停止，当前任务保持待处理');
+        } else {
+          item.status = 'failed';
+          item.note = error && error.message ? error.message : String(error);
+          log(`失败：[${SITES[item.siteId].short}] ${item.name} — ${item.note}`);
+          await updateBlockHint(null);
+          // 失败时自动采集页面结构，便于校准选择器
+          if (state.tabId != null) await logPageDiagnostics(state.tabId, item.name);
+        }
       }
 
       renderTasks();

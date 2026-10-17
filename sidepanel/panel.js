@@ -112,7 +112,7 @@ function setStatusText(text) {
 // 站点选择
 // ---------------------------------------------------------------------------
 
-/** 渲染站点复选框，默认全部勾选 */
+/** 渲染站点复选框，默认全部不勾选，避免误触发查询 */
 function renderSiteOptions() {
   const fragment = document.createDocumentFragment();
   for (const id of SITE_ORDER) {
@@ -122,7 +122,7 @@ function renderSiteOptions() {
     const input = document.createElement('input');
     input.type = 'checkbox';
     input.value = id;
-    input.checked = true;
+    input.checked = false;
     label.append(input, document.createTextNode(` ${site.label}`));
     fragment.appendChild(label);
   }

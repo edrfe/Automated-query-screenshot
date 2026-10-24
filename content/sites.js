@@ -15,7 +15,8 @@
  *   resultLink       搜索结果条目的候选选择器
  *   emptyHint        无结果的文案识别正则
  *   blockHint        站点拦截页的文案识别正则（命中后直接判定为被拒绝访问）
- *   detailUrlPattern 详情页 URL 特征（优先用它判断是否已进入详情页）
+ *   detailUrlPattern 详情页 URL 特征（优先用它判断是否已进入详情页，同时用于过滤结果链接）
+ *   detailUrlHint    详情页 URL 提示（仅用于判定，不过滤结果链接；适合详情地址不确定的站点）
  *   loginUrlPattern  登录页 URL 特征（未登录被重定向时用它判断需要登录）
  *   resultsUrlPattern 结果页 URL 特征（限定结果页地址，避免误判）
  *   allowNonAnchorResult 结果条目不是 <a> 时是否允许按企业名定位可点击元素
@@ -61,19 +62,51 @@ window.GSXT_SITES = {
       'div[class*="geetest"]',
     ],
     resultLink: [
+      '#search_result a',
+      '.search_result a',
+      'div.search_list_item h1 a',
+      'div.search_list_item a',
+      '.search_list_item h1 a',
+      '.search_list_item a',
       '.search_result .search_list li a',
       '.search-list a',
       '.search-list-item a',
+      '.search-result .list-item a',
       '.result-list a',
       '#searchList a',
       'ul.list-con a',
       '.list li a',
     ],
-    emptyHint: /暂无数据|暂无查询结果|未查询到|无查询结果|没有找到/,
+    // 「用时0.03秒，查询到8条信息」是无结果提示的另一种写法
+    emptyHint: /暂无数据|暂无查询结果|未查询到|无查询结果|没有找到|查询到\s*0\s*条/,
     detailUrlPattern: null,
+    // 详情页地址提示：只用于「是否已进入详情页」的判定，不参与结果链接过滤。
+    // gsxt 详情页形如 corp-query-entprise-info-primaryinfoapp-entbaseInfo-xxx.html，
+    // 搜索结果页是 corp-query-search-1.html，用「corp-query-…info」区分即可。
+    detailUrlHint: /gsxt\.gov\.cn\/corp-query-[a-z-]*info/i,
+    // 搜索结果页地址，命中时一律不当作详情页，避免把结果卡片当成企业详情
+    resultsUrlPattern: /gsxt\.gov\.cn\/corp-query-search/,
+    // gsxt 结果条目可能由脚本渲染而非 <a>，此时按企业名定位可点击元素
+    allowNonAnchorResult: true,
+    // gsxt 的结果条目同样会展示信用代码、法定代表人，因此必须靠「详情页特有区块」
+    // 加上「结果列表已消失」「页面出现目标企业名」共同确认，见 content.js 的 isDetailPage
     detailText: {
       all: ['统一社会信用代码'],
-      any: ['注册资本', '成立日期', '企业类型', '法定代表人'],
+      // 详情页顶部有多个业务标签页，结果卡片最多零星出现其中一个词，故要求命中两个
+      minAny: 2,
+      any: [
+        '基础信息',
+        '股东及出资信息',
+        '主要人员',
+        '变更信息',
+        '行政许可信息',
+        '行政处罚信息',
+        '经营异常',
+        '抽查检查',
+        '营业执照信息',
+        '动产抵押登记信息',
+        '股权出质登记信息',
+      ],
     },
     loginDialog: [],
   },

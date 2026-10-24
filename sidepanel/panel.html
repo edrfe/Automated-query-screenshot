@@ -58,9 +58,13 @@
       <div class="muted notice">默认不勾选，请选择需要查询的站点。企查查 / 爱企查 需先在该站点登录，扩展会复用你浏览器里的登录状态。</div>
     </section>
 
-    <!-- 3. 截图设置 -->
+    <!-- 3. 导出与截图 -->
     <section class="card">
-      <div class="card-title">3. 截图设置</div>
+      <div class="card-title">3. 导出与截图</div>
+      <label class="check">
+        <input type="checkbox" id="exportToggle" />
+        导出企业信息（生成 Excel 汇总表）
+      </label>
       <label class="check">
         <input type="checkbox" id="shotToggle" />
         截图并保存（关闭后仅执行查询，不生成图片）

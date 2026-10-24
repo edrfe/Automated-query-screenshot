@@ -30,6 +30,7 @@ const dom = {
   pickFolderBtn: document.getElementById('pickFolderBtn'),
   clearFolderBtn: document.getElementById('clearFolderBtn'),
   folderLabel: document.getElementById('folderLabel'),
+  exportToggle: document.getElementById('exportToggle'),
   shotToggle: document.getElementById('shotToggle'),
   startBtn: document.getElementById('startBtn'),
   pauseBtn: document.getElementById('pauseBtn'),
@@ -47,6 +48,7 @@ const dom = {
 const state = {
   rawRows: [], // Excel 原始行数据
   items: [], // 队列：{ name, siteId, status, note }
+  records: [], // 详情页提取结果，汇总后统一导出
   running: false,
   paused: false,
   tabId: null,
@@ -65,6 +67,37 @@ const STATUS_LABEL = {
   done: '已完成',
   failed: '失败',
 };
+
+/** 汇总表的固定列，顺序与业务方约定一致 */
+const EXPORT_COLUMNS = [
+  '企业名称',
+  '站点',
+  '统一社会信用代码',
+  '法定代表人',
+  '注册资本',
+  '成立日期',
+  '登记状态',
+  '企业类型',
+  '注册地址',
+  '经营范围',
+  '详情页地址',
+  '所属行业',
+  '营业期限',
+  '登记机关',
+  '核准日期',
+  '联系电话',
+  '电子邮箱',
+  '网址',
+  '行政区划',
+  '实缴资本',
+  '曾用名',
+  '工商注册号',
+  '组织机构代码',
+  '纳税人识别号',
+  '纳税人资质',
+  '参保人数',
+  '分支机构参保人数',
+];
 
 /** 简易延时 */
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -219,6 +252,7 @@ function applyNames(names) {
   }
 
   state.items = items;
+  state.records = []; // 新一批任务重新累积提取结果
   dom.taskCount.textContent = `共 ${names.length} 家企业 / ${items.length} 个任务`;
   renderTasks();
   updateProgress();
@@ -317,8 +351,11 @@ function updateButtons() {
   dom.singleNameInput.disabled = state.running;
   dom.singleQueryBtn.disabled = state.running;
   dom.shotToggle.disabled = state.running;
-  dom.pickFolderBtn.disabled = state.running || !dom.shotToggle.checked;
-  dom.clearFolderBtn.disabled = state.running || !dom.shotToggle.checked;
+  dom.exportToggle.disabled = state.running;
+  // 导出与截图都会用到保存位置，任一开启都可选择文件夹
+  const needFolder = dom.shotToggle.checked || dom.exportToggle.checked;
+  dom.pickFolderBtn.disabled = state.running || !needFolder;
+  dom.clearFolderBtn.disabled = state.running || !needFolder;
   dom.siteList.querySelectorAll('input').forEach((input) => {
     input.disabled = state.running;
   });
@@ -447,6 +484,44 @@ async function getTabInfo(tabId) {
   } catch (error) {
     return { url: '(标签页已关闭)', status: '' };
   }
+}
+
+/** 记录当前所有标签页 id，用于识别点击结果后新开的标签页 */
+async function listTabIds() {
+  const tabs = await chrome.tabs.query({});
+  return tabs.map((tab) => tab.id).filter((id) => id != null);
+}
+
+/**
+ * 等待进入详情页。
+ * 兼容两种情况：原标签页直接跳转到详情页；站点在新标签页打开详情页。
+ * @returns {Promise<number>} 详情页所在的标签页 id
+ */
+async function waitDetailPage(tabId, site, name, previousTabIds) {
+  const deadline = Date.now() + 10000;
+  while (Date.now() < deadline) {
+    if (!state.running) throw new Error('已停止');
+
+    if ((await getPageState(tabId, name)) === 'detail') return tabId;
+
+    // 站点用新标签页打开详情时，接管该标签页继续后续提取与截图
+    const tabs = await chrome.tabs.query({});
+    const opened = tabs.find((tab) => {
+      if (tab.id == null || previousTabIds.includes(tab.id)) return false;
+      const matched = window.GSXT_MATCH_SITE(tab.url || '');
+      return Boolean(matched && matched.id === site.id);
+    });
+    if (opened) {
+      state.tabId = opened.id;
+      log(`[${site.short}] 详情页在新标签页打开，已接管该标签页`);
+      return opened.id;
+    }
+
+    await sleep(POLL_INTERVAL_MS);
+  }
+
+  // 没等到新标签页时交回原标签页，由调用方继续等待并给出超时信息
+  return tabId;
 }
 
 /** 等待页面进入期望状态之一，要求状态在页面加载完成后连续两次一致才算稳定 */
@@ -716,6 +791,78 @@ async function saveScreenshot(dataUrl, fileName, siteFolder) {
   return { location: `下载目录/${base}/${siteFolder}`, fileName, fallback: true };
 }
 
+/** 保存二进制文件：优先写入选定文件夹根目录，失败则回退到下载目录 */
+async function saveBlob(blob, fileName) {
+  if (state.folderHandle) {
+    try {
+      if (await ensureFolderPermission(state.folderHandle)) {
+        const finalName = await uniqueFileName(state.folderHandle, fileName);
+        const fileHandle = await state.folderHandle.getFileHandle(finalName, { create: true });
+        const writable = await fileHandle.createWritable();
+        await writable.write(blob);
+        await writable.close();
+        return { location: state.folderHandle.name, fileName: finalName };
+      }
+      log('保存文件夹授权已失效，本次改为保存到下载目录（可点「选择文件夹」重新授权）');
+    } catch (error) {
+      const message = error && error.message ? error.message : String(error);
+      log(`写入选定文件夹失败：${message}，改为保存到下载目录`);
+    }
+  }
+
+  const base = sanitizeFileName(state.config.folder || '企业截图');
+  const url = URL.createObjectURL(blob);
+  try {
+    await chrome.downloads.download({
+      url,
+      filename: `${base}/${fileName}`,
+      saveAs: false,
+      conflictAction: 'uniquify',
+    });
+  } finally {
+    // 下载启动后再释放对象地址，避免链接提前失效
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+  }
+  return { location: `下载目录/${base}`, fileName };
+}
+
+/** 把本次提取到的企业信息汇总导出为 xlsx */
+async function exportRecords() {
+  if (!state.records.length) return;
+
+  // 同一企业同一站点重复提取时只保留最后一次，避免重试产生重复行
+  const merged = new Map();
+  for (const record of state.records) {
+    merged.set(`${record['企业名称']}|${record['站点']}`, record);
+  }
+  // 按约定的固定列输出，页面没有的字段统一填「-」
+  const rows = [...merged.values()].map((record) => {
+    const row = {};
+    for (const column of EXPORT_COLUMNS) {
+      const value = record[column];
+      row[column] = value === undefined || value === null || value === '' ? '-' : value;
+    }
+    return row;
+  });
+
+  const sheet = XLSX.utils.json_to_sheet(rows, { header: EXPORT_COLUMNS });
+  const book = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(book, sheet, '企业信息');
+
+  const buffer = XLSX.write(book, { bookType: 'xlsx', type: 'array' });
+  const blob = new Blob([buffer], {
+    type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  });
+
+  try {
+    const saved = await saveBlob(blob, `企业信息提取_${timestamp()}.xlsx`);
+    log(`已导出汇总表：${saved.location}\\${saved.fileName}（${rows.length} 条记录）`);
+  } catch (error) {
+    const message = error && error.message ? error.message : String(error);
+    log(`导出汇总表失败：${message}`);
+  }
+}
+
 /** 刷新保存位置文案 */
 function updateFolderLabel() {
   dom.folderLabel.textContent = state.folderHandle
@@ -726,6 +873,40 @@ function updateFolderLabel() {
 // ---------------------------------------------------------------------------
 // 单条任务处理
 // ---------------------------------------------------------------------------
+
+/** 提取当前详情页的企业信息并暂存，失败不影响后续截图 */
+async function collectDetailInfo(tabId, item, site) {
+  try {
+    const result = await sendCommand(tabId, { cmd: 'EXTRACT_INFO', name: item.name });
+    const url = (result && result.url) || '';
+    const pageState = (result && result.state) || '';
+
+    // 只有确认停在详情页才写入，避免把结果页地址和数据当成企业详情
+    if (pageState !== 'detail') {
+      log(`[${site.short}] 当前不在详情页（${pageState || '未知'}），跳过信息提取：${url}`);
+      return;
+    }
+    // 独立兜底：地址仍是搜索结果页时同样视为未进入详情页
+    if (site.resultsUrlPattern && site.resultsUrlPattern.test(url)) {
+      log(`[${site.short}] 地址仍是结果页，跳过信息提取：${url}`);
+      return;
+    }
+
+    const info = (result && result.info) || {};
+
+    state.records.push({
+      ...info,
+      企业名称: item.name, // 以导入名称为准，便于与原始名单对齐
+      站点: site.short,
+      详情页地址: url,
+    });
+
+    log(`[${site.short}] 已提取 ${Object.keys(info).length} 个字段`);
+  } catch (error) {
+    const message = error && error.message ? error.message : String(error);
+    log(`[${site.short}] 信息提取失败：${message}`);
+  }
+}
 
 /** 等待查询出结果，期间处理验证码 / 登录打断 */
 async function waitForSearchOutcome(tabId, name, site) {
@@ -822,7 +1003,7 @@ async function waitForSearchOutcome(tabId, name, site) {
 /** 处理单个任务：站点首页 → 填入查询 → 进详情 → 整页截图 → 保存 */
 async function processOne(item) {
   const site = SITES[item.siteId];
-  const tabId = await ensureTab(site);
+  let tabId = await ensureTab(site);
 
   await navigateAndWait(tabId, site.home);
   await waitForState(tabId, ['home'], 30000, item.name);
@@ -843,20 +1024,39 @@ async function processOne(item) {
   if (outcome === 'empty') throw new Error('未查询到该企业');
 
   if (outcome === 'results') {
+    const previousTabIds = await listTabIds();
     const opened = await sendCommand(tabId, { cmd: 'OPEN_FIRST_RESULT', name: item.name });
     if (opened && opened.url) log(`[${site.short}] 打开结果：${opened.url}`);
+    // 详情页可能开在新标签页，接管后再确认状态
+    tabId = await waitDetailPage(tabId, site, item.name, previousTabIds);
     await waitForState(tabId, ['detail'], 30000, item.name);
   }
 
-  // 用户关闭截图开关时，只查询不截图
-  if (!dom.shotToggle.checked) {
-    log(`[${site.short}] 已完成查询（截图开关已关闭，未生成图片）`);
+  const needExport = dom.exportToggle.checked;
+  const needShot = dom.shotToggle.checked;
+
+  // 两项都没开启时，查到详情页即可结束
+  if (!needExport && !needShot) {
+    log(`[${site.short}] 已完成查询（未开启导出与截图）`);
     return;
   }
 
-  // 滚动触发懒加载后回到顶部，保证整页内容完整
-  await sendCommand(tabId, { cmd: 'SCROLL_PREPARE' });
-  await sleep(600);
+  // 详情页多为懒加载：先滚到底再回到顶部，确保页面上所有内容都已渲染
+  try {
+    await sendCommand(tabId, { cmd: 'SCROLL_PREPARE' });
+    await sleep(600);
+  } catch (error) {
+    const message = error && error.message ? error.message : String(error);
+    log(`[${site.short}] 页面预滚动失败，继续执行：${message}`);
+  }
+
+  // 页面已完整渲染，按需提取全部字段
+  if (needExport) await collectDetailInfo(tabId, item, site);
+
+  if (!needShot) {
+    log(`[${site.short}] 已完成查询（截图开关已关闭，未生成图片）`);
+    return;
+  }
 
   const dataUrl = await captureFullPage(tabId);
   const fileName = `${sanitizeFileName(item.name)}_${timestamp()}.png`;
@@ -923,6 +1123,8 @@ async function runLoop() {
     state.paused = false;
     await updateBlockHint(null);
     updateButtons();
+    // 无论正常结束还是中途停止，都把已提取到的信息汇总落表
+    await exportRecords();
     const failedCount = state.items.filter((entry) => entry.status === 'failed').length;
     setStatusText(failedCount > 0 ? `已结束（失败 ${failedCount} 个）` : '已全部完成');
     log('任务结束');
@@ -947,6 +1149,11 @@ dom.singleNameInput.addEventListener('keydown', (event) => {
 dom.shotToggle.addEventListener('change', () => {
   updateButtons();
   log(dom.shotToggle.checked ? '已开启截图' : '已关闭截图，仅执行查询');
+});
+
+dom.exportToggle.addEventListener('change', () => {
+  updateButtons();
+  log(dom.exportToggle.checked ? '已开启企业信息导出' : '已关闭企业信息导出');
 });
 
 dom.fileInput.addEventListener('change', async (event) => {
